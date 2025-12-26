@@ -1,6 +1,7 @@
 import st7789
 from PIL import Image, ImageDraw, ImageFont
 import time
+import czujkaUV
 
 # --- KONFIGURACJA PINÓW ---
 # BCM: DC=25, RST=27, BL=18, CS=8 (CE0)
