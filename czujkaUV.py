@@ -13,7 +13,7 @@ MRES1 = 0x02  # UVA
 MRES2 = 0x03  # UVB
 
 # --- Parametry detekcji zmiany ---
-DELTA_THRESHOLD = 50   # minimalna zmiana RAW uznana za istotną
+DELTA_THRESHOLD = 70   # minimalna zmiana RAW uznana za istotną
 
 def init_sensor():
     try:
@@ -43,15 +43,18 @@ def read_measurement():
     bus.write_byte_data(I2C_ADDR, OSR, 0x83)  # MEAS + SS=1
     time.sleep(0.08)  # czas konwersji (64 ms + zapas)
 
-    # Odczyt UVA
-    uva_l = bus.read_byte_data(I2C_ADDR, MRES1)
-    uva_h = bus.read_byte_data(I2C_ADDR, MRES1)
-    uva = uva_l | (uva_h << 8)
+    uva = bus.read_word_data(I2C_ADDR, MRES1)
+    uvb = bus.read_word_data(I2C_ADDR, MRES2)
 
-    # Odczyt UVB
-    uvb_l = bus.read_byte_data(I2C_ADDR, MRES2)
-    uvb_h = bus.read_byte_data(I2C_ADDR, MRES2)
-    uvb = uvb_l | (uvb_h << 8)
+    # Odczyt UVA
+    # uva_l = bus.read_byte_data(I2C_ADDR, MRES1)
+    # uva_h = bus.read_byte_data(I2C_ADDR, MRES1)
+    # uva = uva_l | (uva_h << 8)
+
+    # # Odczyt UVB
+    # uvb_l = bus.read_byte_data(I2C_ADDR, MRES2)
+    # uvb_h = bus.read_byte_data(I2C_ADDR, MRES2)
+    # uvb = uvb_l | (uvb_h << 8)
 
     return uva, uvb
 
