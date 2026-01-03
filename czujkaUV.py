@@ -26,7 +26,7 @@ def init_sensor():
         bus.write_byte_data(I2C_ADDR, CREG1, 0x56)
 
         # 3. CMD mode
-        bus.write_byte_data(I2C_ADDR, CREG3, 0x01)
+        bus.write_byte_data(I2C_ADDR, CREG3, 0x40)
 
         print(" Czujnik AS7331 poprawnie zainicjalizowany")
 
