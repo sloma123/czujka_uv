@@ -5,12 +5,7 @@ from luma.core.interface.serial import spi, noop
 from luma.lcd.device import st7789
 from PIL import Image, ImageDraw, ImageFont
 
-image = Image.new("RGB", (240, 135), "black")
-draw = ImageDraw.Draw(image)
-draw.rectangle((0, 0, 239, 134), outline="red", width=3)
-draw.text((30, 60), "LCD TEST", font=font, fill="white")
-device.display(image)
-time.sleep(5)
+
 
 
 # --- LCD INIT ---
@@ -33,6 +28,12 @@ device = st7789(
 
 font = ImageFont.load_default()
 
+image = Image.new("RGB", (240, 135), "black")
+draw = ImageDraw.Draw(image)
+draw.rectangle((0, 0, 239, 134), outline="red", width=3)
+draw.text((30, 60), "LCD TEST", font=font, fill="white")
+device.display(image)
+time.sleep(5)
 
 I2C_ADDR = 0x74
 bus = SMBus(1)
