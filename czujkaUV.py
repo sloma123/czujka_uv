@@ -71,40 +71,52 @@ def lcd_display(uva, uvb):
 
 
 def set_gain(gain_index):
-    """Ustawia nowy Gain w czujniku zachowując czas 64ms"""
-    # Zabezpieczenie przed wyjściem poza listę (0-11)
+    """Ustawia Gain zachowując TIME=64ms (0x06)"""
     if gain_index < 0: gain_index = 0
     if gain_index > 11: gain_index = 11
     
-    # Budowa bajtu konfiguracji:
-    # Bity 7:4 to Gain (index), Bity 3:0 to Time (0x06 = 64ms)
     config_byte = (gain_index << 4) | 0x06
     
     try:
+        # KLUCZOWE: Przejdź do Configuration mode
+        bus.write_byte_data(I2C_ADDR, OSR, 0x02)
+        time.sleep(0.005)
+        
+        # Zmień Gain
         bus.write_byte_data(I2C_ADDR, CREG1, config_byte)
-        time.sleep(0.02)
+        time.sleep(0.005)
+        
+        # Wróć do Measurement mode
+        bus.write_byte_data(I2C_ADDR, OSR, 0x03)
+        time.sleep(0.005)
     except OSError:
         pass
     return gain_index
 
+
 def init_sensor():
     try:
-        bus.write_byte_data(I2C_ADDR, OSR, 0x02) # Config mode
-        time.sleep(0.1)
+        # 1. Software reset
+        bus.write_byte_data(I2C_ADDR, OSR, 0x02)
+        time.sleep(0.15)
         
-        # Ustawiamy startowy Gain (64x)
+        # 2. Ustaw początkowy Gain (64x)
         set_gain(current_gain_index)
         
-        # CMD mode (0x40 = MMODE:01, CCLK:00)
+        # 3. CMD mode (MMODE=01, CCLK=00)
         bus.write_byte_data(I2C_ADDR, CREG3, 0x40)
-
+        time.sleep(0.05)
+        
+        # 4. Przejdź do trybu pomiarowego
         bus.write_byte_data(I2C_ADDR, OSR, 0x03)
         time.sleep(0.05)
-        print("Czujnik zainicjalizowany (Tryb Auto-Gain)")
+        
+        print("✓ Czujnik AS7331 zainicjalizowany")
         return True
     except Exception as e:
-        print(f"Błąd init: {e}")
+        print(f"✗ Błąd init: {e}")
         return False
+
 
 def read_measurement():
     """Poprawny odczyt 16-bit LSB-first"""
@@ -139,31 +151,33 @@ def smart_measure():
                 time.sleep(0.1)
                 continue
             
-            # 3. Decyzja Auto-Gain
+            # 3. Decyzja Auto-Gain (ULEPSZONA WERSJA)
             
             # A: Saturacja (lampa UV z bliska)
             if uva_raw >= 65500:
                 if current_gain_index == 0:
                     break  # Już najniższy Gain
-                print(f"Saturacja! Zmniejszam Gain...")
+                print(f"⚠ SATURACJA! Gain {GAIN_LEVELS[current_gain_index]}x → {GAIN_LEVELS[max(0, current_gain_index-3)]}x")
                 current_gain_index = max(0, current_gain_index - 3)
                 set_gain(current_gain_index)
                 continue
             
-            # B: Za jasno
-            elif uva_raw > 50000:
+            # B: Za jasno (>75% zakresu)
+            elif uva_raw > 49000:
                 if current_gain_index > 0:
+                    print(f"↓ Za jasno. Gain {GAIN_LEVELS[current_gain_index]}x → {GAIN_LEVELS[current_gain_index-1]}x")
                     current_gain_index -= 1
                     set_gain(current_gain_index)
                     continue
             
-            # C: Za ciemno
-            elif uva_raw < 1000 and current_gain_index < 11:
+            # C: Za ciemno (<2% zakresu)
+            elif uva_raw < 1300 and current_gain_index < 11:
+                print(f"↑ Za ciemno. Gain {GAIN_LEVELS[current_gain_index]}x → {GAIN_LEVELS[current_gain_index+1]}x")
                 current_gain_index += 1
                 set_gain(current_gain_index)
                 continue
             
-            # D: Wynik OK
+            # D: Wynik OK (1300-49000)
             break
             
         except OSError:
@@ -182,6 +196,7 @@ def smart_measure():
     uvb_uW = uvb_raw / Re_uvb if Re_uvb > 0 else 0
     
     return uva_raw, uvb_raw, uva_uW, uvb_uW, used_gain
+
 
 # --- PROGRAM GŁÓWNY ---
 if not init_sensor():
