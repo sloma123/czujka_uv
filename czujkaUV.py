@@ -1,10 +1,35 @@
 from smbus2 import SMBus
 import time
 
+from luma.core.interface.serial import spi, noop
+from luma.lcd.device import st7789
+from PIL import Image, ImageDraw, ImageFont
+
+# --- LCD INIT ---
+serial = spi(
+    port=0,
+    device=0,
+    gpio_DC=25,
+    gpio_RST=27,
+    bus_speed_hz=40000000
+)
+
+device = st7789(
+    serial,
+    width=240,
+    height=135,
+    rotation=270,
+    offset_left=40,
+    offset_top=53
+)
+
+font = ImageFont.load_default()
+
+
 I2C_ADDR = 0x74
 bus = SMBus(1)
 
-# --- Rejestry ---
+# Rejestry
 OSR   = 0x00
 CREG1 = 0x06
 CREG3 = 0x08
@@ -18,6 +43,17 @@ MRES2 = 0x03  # UVB
 GAIN_LEVELS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
 current_gain_index = 6  # Startujemy od środka (Gain 64x, index 6)
 
+def lcd_display(uva, uvb):
+    image = Image.new("RGB", (240, 135), "black")
+    draw = ImageDraw.Draw(image)
+
+    draw.text((10, 10),  "AS7331 UV SENSOR", font=font, fill="white")
+    draw.text((10, 40),  f"UVA RAW: {uva}", font=font, fill="cyan")
+    draw.text((10, 70),  f"UVB RAW: {uvb}", font=font, fill="yellow")
+
+    device.display(image)
+
+
 def set_gain(gain_index):
     """Ustawia nowy Gain w czujniku zachowując czas 64ms"""
     # Zabezpieczenie przed wyjściem poza listę (0-11)
@@ -30,14 +66,15 @@ def set_gain(gain_index):
     
     try:
         bus.write_byte_data(I2C_ADDR, CREG1, config_byte)
-        return gain_index
+        time.sleep(0.02)
     except OSError:
-        return gain_index
+        pass
+    return gain_index
 
 def init_sensor():
     try:
         bus.write_byte_data(I2C_ADDR, OSR, 0x02) # Config mode
-        time.sleep(0.01)
+        time.sleep(0.1)
         
         # Ustawiamy startowy Gain (64x)
         set_gain(current_gain_index)
@@ -51,35 +88,57 @@ def init_sensor():
         return False
 
 def smart_measure():
+    """Wersja odporna na błędy (iteracyjna, nie rekurencyjna)"""
     global current_gain_index
     
-    # 1. Wykonaj pomiar na obecnych ustawieniach
-    bus.write_byte_data(I2C_ADDR, OSR, 0x83) # Start
-    time.sleep(0.08) # Czekamy 80ms (dla Time 64ms)
-    
-    # Odczyt UVA (jako referencja do sterowania)
-    uva = bus.read_word_data(I2C_ADDR, MRES1)
-    uvb = bus.read_word_data(I2C_ADDR, MRES2)
-    
-    # 2. Logika Auto-Gain (Sprawdzamy czy zmienić czułość)
-    
-    # SYTUACJA A: Za jasno! (Nasycenie > 60000)
-    if uva > 60000 and current_gain_index > 0:
-        print(f"Za jasno ({uva})! Zmniejszam Gain...")
-        current_gain_index -= 1 # Zmniejszamy o krok
-        set_gain(current_gain_index)
-        return smart_measure() # Rekurencja: Mierz jeszcze raz z nowym ustawieniem!
-        
-    # SYTUACJA B: Za ciemno! (Wynik < 500, a mamy zapas wzmocnienia)
-    elif uva < 500 and current_gain_index < 11:
-        # Małe zabezpieczenie, żeby nie skakał przy totalnej ciemności
-        # Zwiększamy tylko jeśli nie jesteśmy już na maxa
-        print(f"Za ciemno ({uva})! Zwiększam Gain...")
-        current_gain_index += 1 # Zwiększamy o krok
-        set_gain(current_gain_index)
-        return smart_measure() # Mierz jeszcze raz
-        
-    # 3. Jeśli jest OK, zwracamy wyniki i aktualny mnożnik Gain
+    # Pętla próbkowania (max 5 prób dopasowania)
+    for proba in range(5):
+        try:
+            # 1. Start Pomiaru
+            bus.write_byte_data(I2C_ADDR, OSR, 0x83)
+            time.sleep(0.08) # Czekamy na wynik (64ms + margines)
+            
+            # 2. Odczyt
+            uva = bus.read_word_data(I2C_ADDR, MRES1)
+            uvb = bus.read_word_data(I2C_ADDR, MRES2)
+            
+            # 3. Decyzja Auto-Gain
+            
+            # A: OŚLEPIENIE (Lampa UV z bliska)
+            if uva >= 65535:
+                if current_gain_index == 0:
+                    return uva, uvb, GAIN_LEVELS[0]
+                
+                print(f" OŚLEPIENIE! Skaczę w dół...")
+                #  KLUCZOWA ZMIANA: Skok o 3 poziomy naraz!
+                current_gain_index -= 3
+                set_gain(current_gain_index)
+                continue # Ponów pętlę
+
+            # B: Za jasno (ale nie max)
+            elif uva > 50000:
+                if current_gain_index > 0:
+                    current_gain_index -= 1
+                    set_gain(current_gain_index)
+                    continue
+
+            # C: Za ciemno
+            elif uva < 1000:
+                if current_gain_index < 11:
+                    current_gain_index += 1
+                    set_gain(current_gain_index)
+                    continue
+            
+            # D: Wynik OK (pomiędzy 1000 a 50000)
+            return uva, uvb, GAIN_LEVELS[current_gain_index]
+
+        except OSError:
+            # KLUCZOWA ZMIANA: Łapiemy błąd wewnątrz pętli i próbujemy jeszcze raz
+            print("Błąd I/O - ponawiam pomiar...")
+            time.sleep(0.1)
+            continue
+
+    # Jeśli po 5 próbach nadal nie pasuje, zwróć to co masz
     return uva, uvb, GAIN_LEVELS[current_gain_index]
 
 # --- PROGRAM GŁÓWNY ---
@@ -105,11 +164,14 @@ while True:
         uvb_uW = uvb_raw * current_factor
         
         print(f"Gain: {used_gain:4}x | UVA: {uva_uW:7.2f} uW/cm2 | UVB: {uvb_uW:7.2f} uW/cm2 (RAW: {uva_raw})")
-        
-        time.sleep(1)
+        print(f"UVA RAW: {uva_raw:6d} | UVB RAW: {uvb_raw:6d}")
+        lcd_display(uva_raw, uvb_raw)
+
+        time.sleep(30)
 
     except KeyboardInterrupt:
         print("\nKoniec.")
         break
     except Exception as e:
         print(f"Błąd: {e}")
+        time.sleep(2)
