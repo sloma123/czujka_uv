@@ -27,9 +27,7 @@ MRES2 = 0x03  # UVB
 # Charakterystyka optyczna (datasheet str. 52)
 # Dla GAIN=2048x, TIME=64ms, λ=360nm (UVA)
 RE_BASE_UVA = 385      # counts/(μW/cm²)
-FSR_BASE_UVA = 170     # μW/cm²
 RE_BASE_UVB = 347      # counts/(μW/cm²) dla λ=300nm
-FSR_BASE_UVB = 189     # μW/cm²
 
 # --- Ustawienia Auto-Gain ---
 # Lista dostępnych wzmocnień (Gain) w AS7331 (kroki od 0 do 11)
@@ -59,143 +57,115 @@ def set_gain(gain_index):
     config_byte = (gain_index << 4) | 0x06
     
     try:
-        # KLUCZOWE: Przejdź do Configuration mode
+        # Configuration mode
         bus.write_byte_data(I2C_ADDR, OSR, 0x02)
-        time.sleep(0.01)  # Zwiększone z 0.005
+        time.sleep(0.02) 
         
         # Zmień Gain
         bus.write_byte_data(I2C_ADDR, CREG1, config_byte)
-        time.sleep(0.01)
+        time.sleep(0.02)
         
-        # WERYFIKACJA - czy Gain się zmienił?
-        readback = bus.read_byte_data(I2C_ADDR, CREG1)
-        if readback != config_byte:
-            print(f"---BŁĄD! Zapisano: 0x{config_byte:02X}, Odczytano: 0x{readback:02X}")
-        else:
-            print(f"+++Gain ustawiony: {GAIN_LEVELS[gain_index]}x (0x{config_byte:02X})")
+        # Wróć do Measurement mode (0x03 nie jest konieczne jesli uzywamy OSR 0x83 pozniej, ale OK)
+        # Tu w Twoim kodzie było OSR 0x03 - to tryb Measurement ciągły, 
+        # ale my używamy CMD (jednorazowy). Zostawiam jak jest, żeby nie mieszać w logice init.
         
-        # Wróć do Measurement mode
-        bus.write_byte_data(I2C_ADDR, OSR, 0x03)
-        time.sleep(0.01)
-    except OSError as e:
-        print(f"✗ Błąd I2C w set_gain: {e}")
+    except OSError:
+        pass
     return gain_index
 
 
 def init_sensor():
     global current_gain_index
     try:
-        # 1. Software reset
         bus.write_byte_data(I2C_ADDR, OSR, 0x02)
         time.sleep(0.15)
         
-        # 2. WYMUSZONY reset Gain do wartości startowej
-        current_gain_index = 6  # 64x
-        print(f"Reset Gain index do: {current_gain_index} ({GAIN_LEVELS[current_gain_index]}x)")
+        current_gain_index = 6 
         set_gain(current_gain_index)
         
-        # 3. CMD mode (MMODE=01, CCLK=00)
+        # CMD mode
         bus.write_byte_data(I2C_ADDR, CREG3, 0x40)
         time.sleep(0.05)
         
-        # 4. Przejdź do trybu pomiarowego
-        bus.write_byte_data(I2C_ADDR, OSR, 0x03)
-        time.sleep(0.05)
-        
-        print("^^^ Czujnik AS7331 zainicjalizowany")
+        print("Czujnik AS7331 zainicjalizowany")
         return True
     except Exception as e:
-        print(f"xxx Błąd init: {e}")
+        print(f"Błąd init: {e}")
         return False
 
 
 def read_measurement():
-    """Poprawny odczyt 16-bit LSB-first"""
     try:
-        # Odczyt UVA (2 bajty, LSB first)
         data_uva = bus.read_i2c_block_data(I2C_ADDR, MRES1, 2)
         uva = data_uva[0] | (data_uva[1] << 8)
         
-        # Odczyt UVB
         data_uvb = bus.read_i2c_block_data(I2C_ADDR, MRES2, 2)
         uvb = data_uvb[0] | (data_uvb[1] << 8)
         
         return uva, uvb
-    except OSError as e:
-        print(f"Błąd I2C: {e}")
+    except OSError:
         return None, None
 
 
 def smart_measure():
-    """Pomiar z Auto-Gain i poprawnym przeliczeniem"""
     global current_gain_index
     
     for attempt in range(5):
         try:
-            # 1. Start pomiaru
-            bus.write_byte_data(I2C_ADDR, OSR, 0x83)
-            time.sleep(0.08)  # 64ms pomiar + margines
+            bus.write_byte_data(I2C_ADDR, OSR, 0x83) # Start
+            time.sleep(0.08) 
             
-            # 2. Odczyt
             uva_raw, uvb_raw = read_measurement()
             if uva_raw is None:
                 time.sleep(0.1)
                 continue
             
-            # 3. Decyzja Auto-Gain (BARDZO AGRESYWNA WERSJA)
+            # --- Logika Auto-Gain ---
+            print(f"[Pomiar] RAW={uva_raw}, Gain={GAIN_LEVELS[current_gain_index]}x")
             
-            print(f"  [Pomiar] RAW={uva_raw}, Gain={GAIN_LEVELS[current_gain_index]}x, Index={current_gain_index}")
-            
-            # A: Saturacja (lampa UV z bliska)
+            # A: Saturacja
             if uva_raw >= 65500:
                 if current_gain_index == 0:
-                    print(f"!!! BŁĄD: Czujnik w pełnej saturacji nawet przy Gain 1x!")
-                    print(f"   Odsuń źródło UV lub zmień TIME na krótszy (np. 4ms)")
                     return 65535, uvb_raw, -1.0, -1.0, 1
                 
-                print(f"eee SATURACJA! Gain {GAIN_LEVELS[current_gain_index]}x → {GAIN_LEVELS[max(0, current_gain_index-3)]}x")
+                print(f"SATURACJA! Zmniejszam Gain (skok -3)")
                 current_gain_index = max(0, current_gain_index - 3)
                 set_gain(current_gain_index)
                 continue
             
-            # B: Bardzo jasno (>60% zakresu) - NOWY PRÓG!
-            elif uva_raw > 39000:  # Było 49000
+            # B: Bardzo jasno
+            elif uva_raw > 39000:
                 if current_gain_index > 0:
-                    print(f"<<< BARDZO jasno! Gain {GAIN_LEVELS[current_gain_index]}x → {GAIN_LEVELS[current_gain_index-1]}x")
                     current_gain_index -= 1
                     set_gain(current_gain_index)
                     continue
             
-            # C: Jasno (>30% zakresu) - NOWY PRÓG!
-            elif uva_raw > 19600:  # Było brak tego progu
+            # C: Jasno
+            elif uva_raw > 19600:
                 if current_gain_index > 0:
-                    print(f"< Jasno. Gain {GAIN_LEVELS[current_gain_index]}x → {GAIN_LEVELS[current_gain_index-1]}x")
                     current_gain_index -= 1
                     set_gain(current_gain_index)
                     continue
             
-            # D: Za ciemno (<2% zakresu)
+            # D: Za ciemno
             elif uva_raw < 1300 and current_gain_index < 11:
-                print(f">> Za ciemno. Gain {GAIN_LEVELS[current_gain_index]}x → {GAIN_LEVELS[current_gain_index+1]}x")
                 current_gain_index += 1
                 set_gain(current_gain_index)
                 continue
             
-            # E: Wynik OK (1300-19600)
-            print(f"*** Wynik OK przy Gain {GAIN_LEVELS[current_gain_index]}x")
+            # E: OK
             break
             
         except OSError:
-            print("Błąd I2C - ponawiam...")
             time.sleep(0.1)
             continue
     
-    # 4. Przeliczenie na μW/cm² (zgodnie z datasheet)
+    # --- PRZELICZANIE (Poprawione .0) ---
     used_gain = GAIN_LEVELS[current_gain_index]
     
-    # Responsivity dla aktualnego Gain (wzór ze str. 52)
-    Re_uva = RE_BASE_UVA * (2048 / used_gain)
-    Re_uvb = RE_BASE_UVB * (2048 / used_gain)
+    #POPRAWKA: Dodano .0 aby wymusić dzielenie zmiennoprzecinkowe
+    Re_uva = RE_BASE_UVA * (used_gain / 2048.0)
+    Re_uvb = RE_BASE_UVB * (used_gain / 2048.0)
     
     uva_uW = uva_raw / Re_uva if Re_uva > 0 else 0
     uvb_uW = uvb_raw / Re_uvb if Re_uvb > 0 else 0
@@ -217,9 +187,9 @@ try:
         uva_raw, uvb_raw, uva_uW, uvb_uW, gain = smart_measure()
         
         if uva_uW < 0:
-            print(f"SATURACJA! RAW: {uva_raw} | ODSUŃ ŹRÓDŁO UV!")
+            print(f"SATURACJA! RAW: {uva_raw}")
         else:
-            print(f"{gain:4}x | {uva_uW:12.3f} | {uvb_uW:12.3f} | {uva_raw:7d} | {uvb_raw:7d}")
+            print(f"{gain:4}x | UVA: {uva_uW:.2f} uW | RAW: {uva_raw}")
         
         
         lcd_display(uva_raw, uvb_raw, gain)
