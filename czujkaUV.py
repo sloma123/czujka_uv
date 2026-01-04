@@ -1,39 +1,18 @@
 from smbus2 import SMBus
 import time
 
-from luma.core.interface.serial import spi, noop
-from luma.lcd.device import st7789
+#WAVESHARE LCD (OFICJALNY DRIVER) =====
+from lib import LCD_1inch14
 from PIL import Image, ImageDraw, ImageFont
 
 
-
-
-# --- LCD INIT ---
-serial = spi(
-    port=0,
-    device=0,
-    gpio_DC=25,
-    gpio_RST=27,
-    bus_speed_hz=40000000
-)
-
-device = st7789(
-    serial,
-    width=240,
-    height=135,
-    rotation=270,
-    offset_left=40,
-    offset_top=53
-)
+# ===== LCD INIT (DOKŁADNIE JAK W DEMO) =====
+disp = LCD_1inch14.LCD_1inch14()
+disp.Init()
+disp.clear()
+disp.bl_DutyCycle(50)
 
 font = ImageFont.load_default()
-
-image = Image.new("RGB", (240, 135), "black")
-draw = ImageDraw.Draw(image)
-draw.rectangle((0, 0, 239, 134), outline="red", width=3)
-draw.text((30, 60), "LCD TEST", font=font, fill="white")
-device.display(image)
-time.sleep(5)
 
 I2C_ADDR = 0x74
 bus = SMBus(1)
@@ -59,15 +38,17 @@ FSR_BASE_UVB = 189     # μW/cm²
 GAIN_LEVELS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
 current_gain_index = 6  # Startujemy od środka (Gain 64x, index 6)
 
-def lcd_display(uva, uvb):
-    image = Image.new("RGB", (240, 135), "black")
+# ===== LCD DRAW =====
+def lcd_display(uva, uvb, gain):
+    image = Image.new("RGB", (disp.width, disp.height), "BLACK")
     draw = ImageDraw.Draw(image)
 
-    draw.text((10, 10),  "AS7331 UV SENSOR", font=font, fill="white")
-    draw.text((10, 40),  f"UVA RAW: {uva}", font=font, fill="cyan")
-    draw.text((10, 70),  f"UVB RAW: {uvb}", font=font, fill="yellow")
+    draw.text((10, 10), "AS7331 UV SENSOR", font=font, fill="WHITE")
+    draw.text((10, 45), f"UVA RAW: {uva}", font=font, fill="CYAN")
+    draw.text((10, 70), f"UVB RAW: {uvb}", font=font, fill="YELLOW")
+    draw.text((10, 100), f"GAIN: {gain}x", font=font, fill="GREEN")
 
-    device.display(image)
+    disp.ShowImage(image)
 
 
 def set_gain(gain_index):
@@ -241,7 +222,7 @@ try:
             print(f"{gain:4}x | {uva_uW:12.3f} | {uvb_uW:12.3f} | {uva_raw:7d} | {uvb_raw:7d}")
         
         
-        lcd_display(uva_raw, uvb_raw)
+        lcd_display(uva_raw, uvb_raw, gain)
         
         time.sleep(2)
 
