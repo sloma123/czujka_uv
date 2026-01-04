@@ -49,128 +49,166 @@ def lcd_display(uva, uvb, gain):
     disp.ShowImage(image)
 
 
+# =================================================================
+# TYLKO TE FUNKCJE ZOSTAŁY ZMIENIONE (Wersja Pancerna v3)
+# =================================================================
+
 def set_gain(gain_index):
-    """Ustawia Gain zachowując TIME=64ms (0x06)"""
+    """Ustawia Gain bezpiecznie, ignorując chwilowe błędy I2C"""
     if gain_index < 0: gain_index = 0
     if gain_index > 11: gain_index = 11
     
+    # Budujemy bajt: Gain na bitach 7:4, Time=64ms (0110) na bitach 3:0
     config_byte = (gain_index << 4) | 0x06
     
     try:
-        # Configuration mode
+        # 1. Tryb konfiguracji
         bus.write_byte_data(I2C_ADDR, OSR, 0x02)
-        time.sleep(0.02) 
+        time.sleep(0.02) # Pauza dla elektroniki
         
-        # Zmień Gain
+        # 2. Wysłanie nowego Gain
         bus.write_byte_data(I2C_ADDR, CREG1, config_byte)
-        time.sleep(0.02)
-        
-        # Wróć do Measurement mode (0x03 nie jest konieczne jesli uzywamy OSR 0x83 pozniej, ale OK)
-        # Tu w Twoim kodzie było OSR 0x03 - to tryb Measurement ciągły, 
-        # ale my używamy CMD (jednorazowy). Zostawiam jak jest, żeby nie mieszać w logice init.
-        
+        time.sleep(0.02) # Pauza na przeładowanie
     except OSError:
+        # Jeśli nie uda się zmienić Gainu (zakłócenia), trudno.
+        # Spróbujemy przy następnym obiegu pętli. Nie crashujemy programu.
         pass
+        
     return gain_index
 
 
 def init_sensor():
+    """Inicjalizacja od ZERA (Gain 1x) dla bezpieczeństwa"""
     global current_gain_index
     try:
+        # Reset programowy (Config mode)
         bus.write_byte_data(I2C_ADDR, OSR, 0x02)
         time.sleep(0.15)
         
-        current_gain_index = 6 
+        # ZMIANA: Startujemy od Gain 1x (Index 0).
+        # To zapobiega 'szokowi' jeśli uruchomisz program wewnątrz lampy.
+        current_gain_index = 0
         set_gain(current_gain_index)
         
-        # CMD mode
+        # Ustawienie trybu CMD (Measurement on demand)
         bus.write_byte_data(I2C_ADDR, CREG3, 0x40)
         time.sleep(0.05)
         
-        print("Czujnik AS7331 zainicjalizowany")
+        print("Czujnik AS7331 zainicjalizowany (Start: Gain 1x)")
         return True
     except Exception as e:
-        print(f"Błąd init: {e}")
+        print(f"Błąd init (sprawdź kable): {e}")
         return False
 
 
 def read_measurement():
+    """Odczyt danych z zabezpieczeniem przed zerwaniem kabla"""
     try:
+        # Czytamy blokami (bezpieczniej niż bajt po bajcie)
+        # Odczyt UVA
         data_uva = bus.read_i2c_block_data(I2C_ADDR, MRES1, 2)
         uva = data_uva[0] | (data_uva[1] << 8)
         
+        # Odczyt UVB
         data_uvb = bus.read_i2c_block_data(I2C_ADDR, MRES2, 2)
         uvb = data_uvb[0] | (data_uvb[1] << 8)
         
         return uva, uvb
     except OSError:
+        # Jeśli wystąpi błąd I2C, zwracamy None.
+        # Funkcja nadrzędna będzie wiedziała, że pomiar jest nieważny.
         return None, None
 
 
 def smart_measure():
+    """Inteligentny pomiar z obsługą błędów i przeliczaniem jednostek"""
     global current_gain_index
     
-    for attempt in range(5):
+    # Zmienne na wyniki (domyślne zera, żeby nie było błędu "variable not assigned")
+    uva_raw = 0
+    uvb_raw = 0
+    
+    # 1. PĘTLA PRÓB (Do 5 podejść, żeby uzyskać dobry wynik)
+    for attempt in range(15):
         try:
-            bus.write_byte_data(I2C_ADDR, OSR, 0x83) # Start
-            time.sleep(0.08) 
+            # a) Start pomiaru
+            bus.write_byte_data(I2C_ADDR, OSR, 0x83)
+            time.sleep(0.08) # Czekamy 80ms
             
+            # b) Pobranie danych
             uva_raw, uvb_raw = read_measurement()
+            
+            # c) Jeśli błąd odczytu (None) - czekamy i próbujemy jeszcze raz
             if uva_raw is None:
                 time.sleep(0.1)
                 continue
             
-            # --- Logika Auto-Gain ---
+            # --- LOGIKA AUTO-GAIN ---
             print(f"[Pomiar] RAW={uva_raw}, Gain={GAIN_LEVELS[current_gain_index]}x")
             
-            # A: Saturacja
-            if uva_raw >= 65500:
+            # SCENARIUSZ A: SATURACJA (Za mocno!)
+            # Jeśli włożysz do lampy na wysokim Gainie, tu wejdzie.
+            if uva_raw >= 65000:
+                print("!!! SATURACJA !!! Zjazd w dół...")
                 if current_gain_index == 0:
-                    return 65535, uvb_raw, -1.0, -1.0, 1
+                    # Jesteśmy na 1x i nadal za jasno - zwracamy max
+                    break 
                 
-                print(f"SATURACJA! Zmniejszam Gain (skok -3)")
-                current_gain_index = max(0, current_gain_index - 3)
+                # Szybki zjazd o 4 poziomy (np. z 2048x na 128x w jednym kroku)
+                current_gain_index = max(0, current_gain_index - 4)
                 set_gain(current_gain_index)
-                continue
+                continue # Mierz od nowa
             
-            # B: Bardzo jasno
-            elif uva_raw > 39000:
+            # SCENARIUSZ B: BARDZO JASNO (>40000)
+            elif uva_raw > 40000:
                 if current_gain_index > 0:
                     current_gain_index -= 1
                     set_gain(current_gain_index)
                     continue
             
-            # C: Jasno
-            elif uva_raw > 19600:
-                if current_gain_index > 0:
-                    current_gain_index -= 1
+            # SCENARIUSZ C: ZA CIEMNO (<1000)
+            # Jeśli wyjmiesz na biurko, tu wejdzie.
+            elif uva_raw < 1000:
+                if current_gain_index < 11:
+                    current_gain_index += 1
                     set_gain(current_gain_index)
                     continue
             
-            # D: Za ciemno
-            elif uva_raw < 1300 and current_gain_index < 11:
-                current_gain_index += 1
-                set_gain(current_gain_index)
-                continue
-            
-            # E: OK
+            # SCENARIUSZ D: JEST IDEALNIE (1000 - 40000)
             break
             
         except OSError:
             time.sleep(0.1)
             continue
-    
-    # --- PRZELICZANIE (Poprawione .0) ---
+            
+    # 2. PRZELICZANIE FIZYCZNE (uW/cm2)
+    # Zabezpieczenie: Jeśli po 5 próbach uva_raw to None, ustawiamy 0
+    if uva_raw is None: 
+        uva_raw = 0
+        uvb_raw = 0
+        
     used_gain = GAIN_LEVELS[current_gain_index]
     
-    #POPRAWKA: Dodano .0 aby wymusić dzielenie zmiennoprzecinkowe
+    # Obliczamy aktualną czułość (maleje wraz ze spadkiem Gainu)
+    # Dodano .0 aby wymusić dzielenie dziesiętne
     Re_uva = RE_BASE_UVA * (used_gain / 2048.0)
     Re_uvb = RE_BASE_UVB * (used_gain / 2048.0)
     
-    uva_uW = uva_raw / Re_uva if Re_uva > 0 else 0
-    uvb_uW = uvb_raw / Re_uvb if Re_uvb > 0 else 0
+    # Dzielimy RAW przez Czułość
+    if Re_uva > 0.00001:
+        uva_uW = uva_raw / Re_uva
+    else:
+        uva_uW = 0.0
+        
+    if Re_uvb > 0.00001:
+        uvb_uW = uvb_raw / Re_uvb
+    else:
+        uvb_uW = 0.0
     
+    # Zwracamy komplet danych dla pętli głównej i LCD
     return uva_raw, uvb_raw, uva_uW, uvb_uW, used_gain
+
+# =================================================================
 
 
 
