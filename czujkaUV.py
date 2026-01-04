@@ -133,10 +133,32 @@ def smart_measure():
         try:
             # a) Start pomiaru
             bus.write_byte_data(I2C_ADDR, OSR, 0x83)
-            time.sleep(0.08) # Czekamy 80ms
+            time.sleep(0.1) 
             
             # b) Pobranie danych
             uva_raw, uvb_raw = read_measurement()
+
+            # Diagnostyka STATUSU (szukamy ukrytych błędów nasycenia)
+            try:
+                # Czytamy 2 bajty z adresu 0x00 (OSR + STATUS)
+                status_data = bus.read_i2c_block_data(I2C_ADDR, 0x00, 2)
+                
+                osr_val = status_data[0]    # To już znasz
+                status_val = status_data[1] # TO JEST REJESTR STATUSU!
+
+                # Analiza bitów rejestru STATUS (wg dokumentacji str. 60, Fig 55)
+                adc_overflow = (status_val >> 5) & 1   # Bit 5: ADCOF
+                mres_overflow = (status_val >> 6) & 1  # Bit 6: MRESOF
+                out_overflow = (status_val >> 7) & 1   # Bit 7: OUTCONVOF
+
+                if adc_overflow:
+                    print(f"!!! ALARM: Przepełnienie analogowe (ADCOF)! Sensor oślepiony! Gain: {GAIN_LEVELS[current_gain_index]}x")
+                
+                if mres_overflow:
+                    print(f"!!! ALARM: Przepełnienie cyfrowe (MRESOF)! Wynik ucięty!")
+
+            except Exception as e:
+                print(f"Błąd odczytu statusu: {e}")
             
             # c) Jeśli błąd odczytu (None) - czekamy i próbujemy jeszcze raz
             if uva_raw is None:
