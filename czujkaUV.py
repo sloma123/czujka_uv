@@ -6,8 +6,8 @@ from lib import LCD_1inch14
 from PIL import Image, ImageDraw, ImageFont
 
 try:
-    font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
-    font_big   = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 34)
+    font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
+    font_big   = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)
 except:
     font_title = ImageFont.load_default()
     font_big   = ImageFont.load_default()
@@ -62,8 +62,8 @@ def lcd_display(uva_raw, uvb_raw, gain, time_ms):
     unit = "uW/cm2"   # LCD często nie ma znaku µ, więc daję "uW/cm2".
                       # Jeśli chcesz spróbować µ: unit = "µW/cm²"
 
-    line1 = f"UVA: {uva_val:7.2f} {unit}"
-    line2 = f"UVB: {uvb_val:7.2f} {unit}"
+    line1 = f"UVA:{uva_val:7.2f} {unit}"
+    line2 = f"UVB:{uvb_val:7.2f} {unit}"
 
     tb = draw.textbbox((0, 0), title, font=font_title)
     tw, th = tb[2] - tb[0], tb[3] - tb[1]
