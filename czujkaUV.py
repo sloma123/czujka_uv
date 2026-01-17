@@ -1,7 +1,6 @@
 from smbus2 import SMBus
 import time
 
-# WAVESHARE LCD (OFICJALNY DRIVER) =====
 from lib import LCD_1inch14
 from PIL import Image, ImageDraw, ImageFont
 
@@ -12,7 +11,6 @@ except:
     font_title = ImageFont.load_default()
     font_big   = ImageFont.load_default()
 
-# ===== LCD INIT =====
 disp = LCD_1inch14.LCD_1inch14()
 disp.Init()
 disp.clear()
@@ -23,32 +21,28 @@ font = ImageFont.load_default()
 I2C_ADDR = 0x74
 bus = SMBus(1)
 
-# Rejestry
 OSR   = 0x00
 CREG1 = 0x06
 CREG3 = 0x08
-MRES1 = 0x02  # UVA (LSB..MSB)
-# MRES2 w datasheet jest kolejnym wynikiem, ale czytamy blokiem od 0x02, więc nie trzeba osobno
+MRES1 = 0x02 
 
-STATUS_ADDR = 0x00  # odczyt 2 bajty: OSR + STATUS
+STATUS_ADDR = 0x00 
 
-# Charakterystyka optyczna (Twoje stałe)
 RE_BASE_UVA = 385
 RE_BASE_UVB = 347
 
 UVA_ALARM_TSH = 5000.0
 UVB_ALARM_TSH = 500.0
-# GAIN: Twoja lista (indeks 0=1x ... 11=2048x)
+
 GAIN_LEVELS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
 
-# TIME kroki: 1,2,4,8,16,32,64 ms (kody 0..6)
 TIME_STEPS = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06]
 
 def time_code_to_ms(code: int) -> int:
     return 1 << (code & 0x0F)
 
 BASE_TIME_CODE = 0x06
-BASE_TIME_MS = time_code_to_ms(BASE_TIME_CODE)  # 64
+BASE_TIME_MS = time_code_to_ms(BASE_TIME_CODE)
 
 current_gain_index = 0                 
 current_time_step_idx = TIME_STEPS.index(0x06)  
@@ -59,7 +53,6 @@ def lcd_display(uva_raw, uvb_raw, gain, time_ms):
     disp.clear()
     unit = "uW/cm2"
 
-    # --- TRYB ALARMU ---
     if uva_val >= UVA_ALARM_TSH:
         image = Image.new("RGB", (disp.width, disp.height), "RED")
         draw = ImageDraw.Draw(image)
@@ -73,8 +66,6 @@ def lcd_display(uva_raw, uvb_raw, gain, time_ms):
             f"UVA: {uva_val:7.2f} {unit}", 
         ]
 
-        # wyśrodkuj blok tekstu w pionie
-        # (tu liczymy total_h podobnie jak w helperze)
         tmp_heights = []
         for ln in lines:
             bb = draw.textbbox((0, 0), ln, font=font_big)
@@ -100,8 +91,6 @@ def lcd_display(uva_raw, uvb_raw, gain, time_ms):
             f"UVB: {uvb_val:7.2f} {unit}", 
         ]
 
-        # wyśrodkuj blok tekstu w pionie
-        # (tu liczymy total_h podobnie jak w helperze)
         tmp_heights = []
         for ln in lines:
             bb = draw.textbbox((0, 0), ln, font=font_big)
@@ -114,7 +103,6 @@ def lcd_display(uva_raw, uvb_raw, gain, time_ms):
         disp.ShowImage(image)
         return
     
-    # --- TRYB NORMALNY ---
     image = Image.new("RGB", (disp.width, disp.height), "BLACK")
     draw = ImageDraw.Draw(image)
 
@@ -147,7 +135,7 @@ def lcd_display(uva_raw, uvb_raw, gain, time_ms):
 
 
 def draw_centered_lines(draw, lines, font, fill, y_top=0, spacing=4):
-    # policz łączną wysokość bloku tekstu
+
     heights = []
     widths = []
     for ln in lines:
@@ -164,10 +152,8 @@ def draw_centered_lines(draw, lines, font, fill, y_top=0, spacing=4):
         y += h + spacing
 
 
-
 def gain_index_to_reg_code(gain_index: int) -> int:
-    # AS7331: kod 0 => 2048x ... kod 11 => 1x
-    # u Ciebie gain_index 0=>1x ... 11=>2048x, więc odwracamy:
+
     return 11 - gain_index
 
 def set_conf(gain_index: int, time_code: int):
@@ -178,7 +164,6 @@ def set_conf(gain_index: int, time_code: int):
     gain_code = gain_index_to_reg_code(gain_index)
     config_byte = ((gain_code & 0x0F) << 4) | time_code
 
-    # CONFIG state
     bus.write_byte_data(I2C_ADDR, OSR, 0x02)
     time.sleep(0.005)
     bus.write_byte_data(I2C_ADDR, CREG1, config_byte)
@@ -194,11 +179,11 @@ def init_sensor():
         current_time_step_idx = TIME_STEPS.index(0x06)  # 64ms
         set_conf(current_gain_index, TIME_STEPS[current_time_step_idx])
 
-        # CMD mode
+        #CMD mode
         bus.write_byte_data(I2C_ADDR, CREG3, 0x40)
         time.sleep(0.01)
 
-        print("AS7331 OK (Gain 1x, Time 64ms)")
+        print("AS7331 jest połączony")
         return True
     except Exception as e:
         print(f"Błąd init: {e}")
@@ -209,7 +194,7 @@ def read_status_byte():
     return data[1]
 
 def read_measurement():
-    """UVA + UVB jednym odczytem: 4 bajty od 0x02"""
+
     try:
         data = bus.read_i2c_block_data(I2C_ADDR, MRES1, 4)
         uva = data[0] | (data[1] << 8)
@@ -219,12 +204,11 @@ def read_measurement():
         return None, None
 
 def measure_once(time_code: int):
-    bus.write_byte_data(I2C_ADDR, OSR, 0x83)  # start pomiaru
+    bus.write_byte_data(I2C_ADDR, OSR, 0x83)
 
     t_ms = time_code_to_ms(time_code)
     time.sleep((t_ms + 2) / 1000.0)
 
-    # opcjonalne dopollowanie NOTREADY (bit 2)
     deadline = time.monotonic() + 0.05
     status = read_status_byte()
     notready = (status >> 2) & 1
@@ -237,10 +221,7 @@ def measure_once(time_code: int):
     return uva, uvb, status
 
 def raw_to_uW_cm2(uva_raw: int, uvb_raw: int, gain: int, time_ms: int):
-    """
-    Przelicza RAW na mikrowaty na centymetr kwadratowy [µW/cm²]
-    Zakłada, że RE_BASE_UVA/RE_BASE_UVB są dla GAIN=2048x i TIME=BASE_TIME_MS (64ms).
-    """
+
     if uva_raw is None or uvb_raw is None:
         return 0.0, 0.0
 
@@ -308,7 +289,6 @@ def smart_measure_auto():
 
                 break
 
-            # ZA CIEMNO
             if too_dark_hard or (too_dark_soft and dark_streak >= 1):
                 dark_streak += 1
                 bright_streak = 0
@@ -324,8 +304,6 @@ def smart_measure_auto():
                     continue
 
                 break
-
-            # OK
             break
 
         except OSError:
@@ -335,24 +313,16 @@ def smart_measure_auto():
     used_time_code = TIME_STEPS[current_time_step_idx]
     used_time_ms = time_code_to_ms(used_time_code)
 
-    time_factor = BASE_TIME_MS / float(used_time_ms)
 
-    Re_uva_base = RE_BASE_UVA * (used_gain / 2048.0)
-    Re_uvb_base = RE_BASE_UVB * (used_gain / 2048.0)
+    return uva_raw, uvb_raw, used_gain, used_time_ms
 
-    uva_uW = (uva_raw / Re_uva_base) * time_factor if Re_uva_base > 0 else 0.0
-    uvb_uW = (uvb_raw / Re_uvb_base) * time_factor if Re_uvb_base > 0 else 0.0
-
-    return uva_raw, uvb_raw, uva_uW, uvb_uW, used_gain, used_time_ms
-
-# --- PROGRAM GŁÓWNY ---
 if not init_sensor():
     exit(1)
 
 try:
     while True:
-        uva_raw, uvb_raw, uva_uW, uvb_uW, gain, time_ms = smart_measure_auto()
-        print(f"G:{gain:<4}x | T:{time_ms:>3}ms | UVA: {uva_uW:.2f} | UVB: {uvb_uW:.2f} | RAW UVA:{uva_raw} UVB:{uvb_raw}")
+        uva_raw, uvb_raw, gain, time_ms = smart_measure_auto()
+        print(f"G:{gain:<4}x | T:{time_ms:>3}ms | RAW UVA:{uva_raw} UVB:{uvb_raw}")
         lcd_display(uva_raw, uvb_raw, gain, time_ms)
         time.sleep(2)
 
