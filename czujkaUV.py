@@ -37,6 +37,7 @@ RE_BASE_UVA = 385
 RE_BASE_UVB = 347
 
 UVA_ALARM_TSH = 5000.0
+UVB_ALARM_TSH = 300.0
 # GAIN: Twoja lista (indeks 0=1x ... 11=2048x)
 GAIN_LEVELS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
 
@@ -68,6 +69,7 @@ def lcd_display(uva_raw, uvb_raw, gain, time_ms):
             "DAWKA",
             "PROMIENIOWANIA",
             "UVA",
+            f"UVA: {uva_val:7.2f} {unit}", 
         ]
 
         # wyśrodkuj blok tekstu w pionie
@@ -84,6 +86,33 @@ def lcd_display(uva_raw, uvb_raw, gain, time_ms):
         disp.ShowImage(image)
         return
 
+    if uvb_val >= UVB_ALARM_TSH:
+        image = Image.new("RGB", (disp.width, disp.height), "RED")
+        draw = ImageDraw.Draw(image)
+
+        lines = [
+            "UWAGA!",
+            "NIEBEZPIECZNA",
+            "DAWKA",
+            "PROMIENIOWANIA",
+            "UVB",
+            f"UVB: {uvb_val:7.2f} {unit}", 
+        ]
+
+        # wyśrodkuj blok tekstu w pionie
+        # (tu liczymy total_h podobnie jak w helperze)
+        tmp_heights = []
+        for ln in lines:
+            bb = draw.textbbox((0, 0), ln, font=font_big)
+            tmp_heights.append(bb[3] - bb[1])
+        spacing = 3
+        total_h = sum(tmp_heights) + spacing * (len(lines) - 1)
+        y0 = (disp.height - total_h) // 2
+
+        draw_centered_lines(draw, lines, font_big, "BLACK", y_top=y0, spacing=spacing)
+        disp.ShowImage(image)
+        return
+    
     # --- TRYB NORMALNY ---
     image = Image.new("RGB", (disp.width, disp.height), "BLACK")
     draw = ImageDraw.Draw(image)
