@@ -251,7 +251,7 @@ try:
     while True:
         uva_raw, uvb_raw, uva_uW, uvb_uW, gain, time_ms = smart_measure_auto()
         print(f"G:{gain:<4}x | T:{time_ms:>3}ms | UVA: {uva_uW:.2f} | UVB: {uvb_uW:.2f} | RAW UVA:{uva_raw} UVB:{uvb_raw}")
-        lcd_display(uva_uW, uvb_uW)
+        lcd_display(uva_raw, uvb_raw)
         time.sleep(2)
 
 except KeyboardInterrupt:
