@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 try:
     font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
-    font_big   = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)
+    font_big   = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
 except:
     font_title = ImageFont.load_default()
     font_big   = ImageFont.load_default()
