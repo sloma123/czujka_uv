@@ -5,6 +5,13 @@ import time
 from lib import LCD_1inch14
 from PIL import Image, ImageDraw, ImageFont
 
+try:
+    font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
+    font_big   = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 34)
+except:
+    font_title = ImageFont.load_default()
+    font_big   = ImageFont.load_default()
+
 # ===== LCD INIT =====
 disp = LCD_1inch14.LCD_1inch14()
 disp.Init()
@@ -41,21 +48,40 @@ def time_code_to_ms(code: int) -> int:
 BASE_TIME_CODE = 0x06
 BASE_TIME_MS = time_code_to_ms(BASE_TIME_CODE)  # 64
 
-# --- STAN (UWAGA: to są zmienne, które się zmieniają) ---
-current_gain_index = 0                 # start 1x
-current_time_step_idx = TIME_STEPS.index(0x06)  # start 64ms (indeks 6)
+current_gain_index = 0                 
+current_time_step_idx = TIME_STEPS.index(0x06)  
 
-def lcd_display(uva, uvb, gain, time_ms):
+def lcd_display(uva, uvb):
     image = Image.new("RGB", (disp.width, disp.height), "BLACK")
     draw = ImageDraw.Draw(image)
 
-    draw.text((10, 10), "AS7331 UV SENSOR", font=font, fill="WHITE")
-    draw.text((10, 45), f"UVA RAW: {uva}", font=font, fill="CYAN")
-    draw.text((10, 70), f"UVB RAW: {uvb}", font=font, fill="YELLOW")
-    draw.text((10, 100), f"GAIN: {gain}x", font=font, fill="GREEN")
-    draw.text((10, 125), f"TIME: {time_ms}ms", font=font, fill="ORANGE")
+    title = "POMIAR"
+    line1 = f"UVA: {uva}"
+    line2 = f"UVB: {uvb}"
+
+    tb = draw.textbbox((0, 0), title, font=font_title)
+    tw, th = tb[2] - tb[0], tb[3] - tb[1]
+    draw.text(((disp.width - tw) // 2, 6), title, font=font_title, fill="WHITE")
+
+    b1 = draw.textbbox((0, 0), line1, font=font_big)
+    w1, h1 = b1[2] - b1[0], b1[3] - b1[1]
+
+    b2 = draw.textbbox((0, 0), line2, font=font_big)
+    w2, h2 = b2[2] - b2[0], b2[3] - b2[1]
+
+    spacing = 6
+    total_h = h1 + spacing + h2
+
+    y0 = max(28, (disp.height - total_h) // 2)
+
+    x1 = (disp.width - w1) // 2
+    x2 = (disp.width - w2) // 2
+
+    draw.text((x1, y0), line1, font=font_big, fill="RED")
+    draw.text((x2, y0 + h1 + spacing), line2, font=font_big, fill="BLUE")
 
     disp.ShowImage(image)
+
 
 def gain_index_to_reg_code(gain_index: int) -> int:
     # AS7331: kod 0 => 2048x ... kod 11 => 1x
@@ -224,7 +250,7 @@ try:
     while True:
         uva_raw, uvb_raw, uva_uW, uvb_uW, gain, time_ms = smart_measure_auto()
         print(f"G:{gain:<4}x | T:{time_ms:>3}ms | UVA: {uva_uW:.2f} | UVB: {uvb_uW:.2f} | RAW UVA:{uva_raw} UVB:{uvb_raw}")
-        lcd_display(uva_raw, uvb_raw, gain, time_ms)
+        lcd_display(uva_uW, uvb_uW)
         time.sleep(2)
 
 except KeyboardInterrupt:
