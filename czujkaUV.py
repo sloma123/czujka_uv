@@ -36,6 +36,7 @@ STATUS_ADDR = 0x00  # odczyt 2 bajty: OSR + STATUS
 RE_BASE_UVA = 385
 RE_BASE_UVB = 347
 
+UVA_ALARM_TSH = 5000.0
 # GAIN: Twoja lista (indeks 0=1x ... 11=2048x)
 GAIN_LEVELS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
 
@@ -55,12 +56,40 @@ def lcd_display(uva_raw, uvb_raw, gain, time_ms):
     uva_val, uvb_val = raw_to_uW_cm2(uva_raw, uvb_raw, gain, time_ms)
 
     disp.clear()
+
+    # --- TRYB ALARMU ---
+    if uva_val >= UVA_ALARM_TSH:
+        image = Image.new("RGB", (disp.width, disp.height), "RED")
+        draw = ImageDraw.Draw(image)
+
+        lines = [
+            "UWAGA!",
+            "NIEBEZPIECZNA",
+            "DAWKA",
+            "PROMIENIOWANIA",
+            "UVA",
+        ]
+
+        # wyśrodkuj blok tekstu w pionie
+        # (tu liczymy total_h podobnie jak w helperze)
+        tmp_heights = []
+        for ln in lines:
+            bb = draw.textbbox((0, 0), ln, font=font_big)
+            tmp_heights.append(bb[3] - bb[1])
+        spacing = 3
+        total_h = sum(tmp_heights) + spacing * (len(lines) - 1)
+        y0 = (disp.height - total_h) // 2
+
+        draw_centered_lines(draw, lines, font_big, "BLACK", y_top=y0, spacing=spacing)
+        disp.ShowImage(image)
+        return
+
+    # --- TRYB NORMALNY ---
     image = Image.new("RGB", (disp.width, disp.height), "BLACK")
     draw = ImageDraw.Draw(image)
 
     title = "POMIAR UV"
-    unit = "uW/cm2"   # LCD często nie ma znaku µ, więc daję "uW/cm2".
-                      # Jeśli chcesz spróbować µ: unit = "µW/cm²"
+    unit = "uW/cm2"
 
     line1 = f"UVA:{uva_val:7.2f} {unit}"
     line2 = f"UVB:{uvb_val:7.2f} {unit}"
@@ -85,6 +114,24 @@ def lcd_display(uva_raw, uvb_raw, gain, time_ms):
     draw.text((x2, y0 + h1 + spacing), line2, font=font_big, fill="YELLOW")
 
     disp.ShowImage(image)
+
+
+def draw_centered_lines(draw, lines, font, fill, y_top=0, spacing=4):
+    # policz łączną wysokość bloku tekstu
+    heights = []
+    widths = []
+    for ln in lines:
+        bb = draw.textbbox((0, 0), ln, font=font)
+        widths.append(bb[2] - bb[0])
+        heights.append(bb[3] - bb[1])
+
+    total_h = sum(heights) + spacing * (len(lines) - 1)
+    y = y_top
+
+    for ln, w, h in zip(lines, widths, heights):
+        x = (disp.width - w) // 2
+        draw.text((x, y), ln, font=font, fill=fill)
+        y += h + spacing
 
 
 
