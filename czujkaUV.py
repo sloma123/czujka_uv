@@ -51,14 +51,19 @@ BASE_TIME_MS = time_code_to_ms(BASE_TIME_CODE)  # 64
 current_gain_index = 0                 
 current_time_step_idx = TIME_STEPS.index(0x06)  
 
-def lcd_display(uva, uvb):
+def lcd_display(uva_raw, uvb_raw, gain, time_ms):
+    uva_val, uvb_val = raw_to_uW_cm2(uva_raw, uvb_raw, gain, time_ms)
+
     disp.clear()
     image = Image.new("RGB", (disp.width, disp.height), "BLACK")
     draw = ImageDraw.Draw(image)
 
-    title = "POMIAR"
-    line1 = f"UVA: {uva}"
-    line2 = f"UVB: {uvb}"
+    title = "POMIAR UV"
+    unit = "uW/cm2"   # LCD często nie ma znaku µ, więc daję "uW/cm2".
+                      # Jeśli chcesz spróbować µ: unit = "µW/cm²"
+
+    line1 = f"UVA: {uva_val:7.2f} {unit}"
+    line2 = f"UVB: {uvb_val:7.2f} {unit}"
 
     tb = draw.textbbox((0, 0), title, font=font_title)
     tw, th = tb[2] - tb[0], tb[3] - tb[1]
@@ -66,22 +71,21 @@ def lcd_display(uva, uvb):
 
     b1 = draw.textbbox((0, 0), line1, font=font_big)
     w1, h1 = b1[2] - b1[0], b1[3] - b1[1]
-
     b2 = draw.textbbox((0, 0), line2, font=font_big)
     w2, h2 = b2[2] - b2[0], b2[3] - b2[1]
 
     spacing = 6
     total_h = h1 + spacing + h2
-
     y0 = max(28, (disp.height - total_h) // 2)
 
     x1 = (disp.width - w1) // 2
     x2 = (disp.width - w2) // 2
 
     draw.text((x1, y0), line1, font=font_big, fill="CYAN")
-    draw.text((x2, y0 + h1 + spacing), line2, font=font_big, fill="BLUE")
+    draw.text((x2, y0 + h1 + spacing), line2, font=font_big, fill="YELLOW")
 
     disp.ShowImage(image)
+
 
 
 def gain_index_to_reg_code(gain_index: int) -> int:
@@ -154,6 +158,27 @@ def measure_once(time_code: int):
 
     uva, uvb = read_measurement()
     return uva, uvb, status
+
+def raw_to_uW_cm2(uva_raw: int, uvb_raw: int, gain: int, time_ms: int):
+    """
+    Przelicza RAW na mikrowaty na centymetr kwadratowy [µW/cm²]
+    Zakłada, że RE_BASE_UVA/RE_BASE_UVB są dla GAIN=2048x i TIME=BASE_TIME_MS (64ms).
+    """
+    if uva_raw is None or uvb_raw is None:
+        return 0.0, 0.0
+
+    gain_factor = gain / 2048.0
+    time_factor = BASE_TIME_MS / float(time_ms)
+
+    Re_uva = RE_BASE_UVA * gain_factor
+    Re_uvb = RE_BASE_UVB * gain_factor
+
+    uva_uW_cm2 = (uva_raw / Re_uva) * time_factor if Re_uva > 0 else 0.0
+    uvb_uW_cm2 = (uvb_raw / Re_uvb) * time_factor if Re_uvb > 0 else 0.0
+
+    return uva_uW_cm2, uvb_uW_cm2
+
+
 
 def smart_measure_auto():
     global current_gain_index, current_time_step_idx
@@ -251,8 +276,9 @@ try:
     while True:
         uva_raw, uvb_raw, uva_uW, uvb_uW, gain, time_ms = smart_measure_auto()
         print(f"G:{gain:<4}x | T:{time_ms:>3}ms | UVA: {uva_uW:.2f} | UVB: {uvb_uW:.2f} | RAW UVA:{uva_raw} UVB:{uvb_raw}")
-        lcd_display(uva_raw, uvb_raw)
+        lcd_display(uva_raw, uvb_raw, gain, time_ms)
         time.sleep(2)
 
 except KeyboardInterrupt:
     bus.close()
+
