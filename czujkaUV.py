@@ -52,6 +52,7 @@ current_gain_index = 0
 current_time_step_idx = TIME_STEPS.index(0x06)  
 
 def lcd_display(uva, uvb):
+    disp.clear()
     image = Image.new("RGB", (disp.width, disp.height), "BLACK")
     draw = ImageDraw.Draw(image)
 
@@ -77,7 +78,7 @@ def lcd_display(uva, uvb):
     x1 = (disp.width - w1) // 2
     x2 = (disp.width - w2) // 2
 
-    draw.text((x1, y0), line1, font=font_big, fill="RED")
+    draw.text((x1, y0), line1, font=font_big, fill="CYAN")
     draw.text((x2, y0 + h1 + spacing), line2, font=font_big, fill="BLUE")
 
     disp.ShowImage(image)
