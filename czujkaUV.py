@@ -37,7 +37,7 @@ RE_BASE_UVA = 385
 RE_BASE_UVB = 347
 
 UVA_ALARM_TSH = 5000.0
-UVB_ALARM_TSH = 300.0
+UVB_ALARM_TSH = 500.0
 # GAIN: Twoja lista (indeks 0=1x ... 11=2048x)
 GAIN_LEVELS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
 
@@ -57,6 +57,7 @@ def lcd_display(uva_raw, uvb_raw, gain, time_ms):
     uva_val, uvb_val = raw_to_uW_cm2(uva_raw, uvb_raw, gain, time_ms)
 
     disp.clear()
+    unit = "uW/cm2"
 
     # --- TRYB ALARMU ---
     if uva_val >= UVA_ALARM_TSH:
